@@ -119,9 +119,133 @@ SoT <- cbind.data.frame(HSTF,HSTA,ASTF,ASTA)
 boxplot(SoT, ylab="Shots on target")
 
 
+## 4.2 Producing Head-to-Head Statistics from Historical Match Data
+
+# Downloading histoircal data for the 5 seasons 2016/17 to 2020/21
+seasons <- c(rep("1617", 1), rep("1718", 1), rep("1819", 1), rep("1920", 1), rep("2021", 1))
+division <- c(rep(c("E0"), 5))
+
+urls <- paste(seasons, division, sep='/')
+urls <- paste("https://www.football-data.co.uk/mmz4281", urls, sep="/")
+
+# For loop to load the data in
+download_data = NULL
+for (i in 1:length(urls)){
+  temp = read.csv(urls[i])
+  temp = temp[,c("Div", "Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG", "FTR", "HS", "AS", "HST", "AST")]
+  download_data = rbind(download_data, temp)
+}
+
+# Checking the download has worked
+head(download_data)
+tail(download_data) 
+
+# Now we want only the H2H matches involving Arsenal and Chelsea
+teamH <- 'Arsenal'
+teamA <- 'Chelsea'
+
+# Can extract these games using an indicator variable
+n <- nrow(download_data)
+ind <- matrix(0, n, 1) # nx1 matrix full of zeros
+ndat <- cbind.data.frame(download_data, ind)
+
+# Populate with a 1 if we have Arsenal vs Chelsea
+for (i in 1:n){
+  if(ndat$HomeTeam[i] == teamH & ndat$AwayTeam[i] == teamA){ndat$ind[i] <- 1}
+}
+
+# Selecting only the games we want
+H2H <- ndat[ndat$ind == 1,]
+
+# Adding shots ratio to these games
+library(dplyr)
+H2H <- H2H %>%
+  dplyr::mutate(HTSR = round(HS / (HS + AS), 3)) %>%
+  dplyr::mutate(ATSR = round(AS / (HS + AS), 3))
+
+print(H2H)
 
 
+## 4.3 Producing PiT League Tables from Historical Match Data
+
+#Load in the historical match data - first 98 EPL games and first seven variables
+PiT_dat <- head(read.csv('https://www.football-data.co.uk/mmz4281/2021/E0.csv'), 98)[,1:7]
+
+# To use our functions, we need to define the 4 variables
+HomeTeam <- PiT_dat$HomeTeam
+AwayTeam <- PiT_dat$AwayTeam
+HomeGoals <- PiT_dat$FTHG
+AwayGoals <- PiT_dat$FTAG
+
+# Function 1. Creates a vector of match outcomes
+outcome <- function(hGoals, aGoals){
+  nMatches <- length(hGoals)
+  results <- matrix(NA, nMatches, 1)
+  
+  for (i in 1:nMatches){
+    if (hGoals[i] > aGoals[i]) {results[i] <- 'H'}
+    if (hGoals[i] < aGoals[i]) {results[i] <- 'A'}
+    if (hGoals[i] == aGoals[i]) {results[i] <- 'D'}
+  }
+  return(results)
+}
+
+# Function 2. This creates a current league table from the match results data
+create.table <- function(hTeam, aTeam, hGoals, aGoals){
+  
+  # Harvest team names and collate in to a vector
+  teams.temp <- unique(hTeam)
+  (teams <- sort(teams.temp)) # Arrange in alphabetical order.
+  nTeams = length(teams) # This identifies the number of teams in the league.
+  
+  # Create a vector containing the match outcomes (i.e. H, A or D)
+  results <- outcome(hGoals, aGoals)
+  
+  # Create empty vectors to store results.
+  x <- numeric(nTeams)
+  hWins <- x; hLoss <- x; hDraws <- x;
+  aWins <- x; aLoss <- x; aDraws <- x;
+  goals.for <- x; goals.against <- x; goal.diff <- x;
+  matches.played <- x; pts <- x;
+  
+  # Populate vectors
+  for (i in 1:nTeams) {
+    hResults <- results[hTeam == teams[i]]
+    aResults <- results[aTeam == teams[i]]
+    matches.played[i] <- length(hResults) + length(aResults)
+    goals.H <- sum(hGoals[hTeam == teams[i]])
+    goals.A <- sum(aGoals[aTeam == teams[i]])
+    goals.for[i] <- goals.H + goals.A
+    conceded.H <- sum(aGoals[hTeam == teams[i]])
+    conceded.A <- sum(hGoals[aTeam == teams[i]])
+    goals.against[i] <- conceded.H + conceded.A
+    goal.diff[i] <- goals.for[i] - goals.against[i]
+    hWins[i] <- sum(hResults == "H")
+    hDraws[i] <- sum(hResults == "D")
+    hLoss[i] <- sum(hResults == "A")
+    aWins[i] <- sum(aResults == "A")
+    aDraws[i] <- sum(aResults == "D")
+    aLoss[i] <- sum(aResults == "H")
+    
+    # Compute total points from the number of wins and draws for the respective teams.
+    # Points awarded for the match outcomes
+    win.pts <- 3
+    draw.pts <- 1
+    pts[i] <- (win.pts*(hWins[i] + aWins[i])) + (draw.pts * (hDraws[i] + aDraws[i]))
+  }
+  
+  table <- data.frame(cbind(matches.played, hWins, hDraws,hLoss, aWins, aDraws, aLoss,
+                            goals.for, goals.against, goal.diff, pts), row.names=teams)
+  
+  names(table) <- c("PLD", "HW", "HD", "HL", "AW", "AD", "AL", "GF", "GA", "GD", "PTS")
+  ord <- order(-table$PTS, -table$GD, -table$GF)
+  table <- table[ord, ]
+  return(table)
+}
+
+# Applying the 2 functions to produce the league table
+League.table <- create.table(HomeTeam, AwayTeam, HomeGoals, AwayGoals)
+print(League.table)
 
 
-
- 
+## 4.4 Compiling PiT Feature Tables from Historical Match Data
