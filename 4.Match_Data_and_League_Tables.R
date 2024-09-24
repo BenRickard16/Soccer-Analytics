@@ -249,3 +249,146 @@ print(League.table)
 
 
 ## 4.4 Compiling PiT Feature Tables from Historical Match Data
+
+# Load in the match data for 2020-2021 selecting first 20 variables, and 98 matches
+fb_data <- head(read.csv('https://www.football-data.co.uk/mmz4281/2021/E0.csv'), 98)[, 1:20]
+
+# Select only the variables we want in the analysis
+soc_dat <- fb_data[, c("Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG", "FTR", "HS", "AS", "HST", 
+                       "AST", "HC", "AC")]
+
+# Add some new derived variables
+soc_dat["HPts"] <- 0 # This creates the new column to store home team points per match 
+soc_dat["APts"] <- 0 # This creates the new column to store away team points per match 
+
+for(i in 1:nrow(soc_dat)){
+  if(soc_dat$FTR[i] == "H"){soc_dat$HPts[i] <- 3}
+  if(soc_dat$FTR[i] == "A"){soc_dat$APts[i] <- 3}
+  if(soc_dat$FTR[i] == "D") {soc_dat$HPts[i] <- 1}
+  if(soc_dat$FTR[i] == "D") {soc_dat$APts[i] <- 1}
+}
+
+# Rename variables
+colnames(soc_dat)[colnames(soc_dat) == 'FTHG'] <- 'HG'
+colnames(soc_dat)[colnames(soc_dat) == 'FTAG'] <- 'AG'
+colnames(soc_dat)[colnames(soc_dat) == 'FTR'] <- 'Result'
+
+# Inspect data
+head(soc_dat)
+
+# Create user-defined function ‘feature.Calc’ to compute PiT feature scores for any given team
+feature.Calc <- function(df, team){
+  Hmatches <- df[df$HomeTeam == team,] # This selects the target team's home matches.
+  Amatches <- df[df$AwayTeam == team,] # This selects the target team's away matches.
+  all <- rbind.data.frame(Hmatches,Amatches)
+  n <- nrow(all) # Number of matches
+  
+  # Create empty vectors to store results.
+  x <- numeric(n)
+  GF <- x; GA <- x; SF <- x; SA <- x; STF <- x; STA <- x;
+  CF <- x; CA <- x; Pts <- x;
+  
+  # Goals for
+  for(i in 1:n){
+    if(all$HomeTeam[i] == team){GF[i] <- all$HG[i]}
+    else {GF[i] <- all$AG[i]}
+  }
+  
+  # Goals against
+  for(i in 1:n){
+    if(all$HomeTeam[i] == team){GA[i] <- all$AG[i]}
+    else {GA[i] <- all$HG[i]}
+  }
+  
+  # Shots for
+  for(i in 1:n){
+    if(all$HomeTeam[i] == team){SF[i] <- all$HS[i]}
+    else {SF[i] <- all$AS[i]}
+  }
+  
+  # Shots against
+  for(i in 1:n){
+    if(all$HomeTeam[i] == team){SA[i] <- all$AS[i]}
+    else {SA[i] <- all$HS[i]}
+  }
+  
+  # Shots on target for
+  for(i in 1:n){
+    if(all$HomeTeam[i] == team){STF[i] <- all$HST[i]}
+    else {STF[i] <- all$AST[i]}
+  }
+  
+  # Shots on target against
+  for(i in 1:n){
+    if(all$HomeTeam[i] == team){STA[i] <- all$AST[i]}
+    else {STA[i] <- all$HST[i]}
+  }
+  
+  # Corners for
+  for(i in 1:n){
+    if(all$HomeTeam[i] == team){CF[i] <- all$HC[i]}
+    else {CF[i] <- all$AC[i]}
+  }
+  
+  # Corners against
+  for(i in 1:n){
+    if(all$HomeTeam[i] == team){CA[i] <- all$AC[i]}
+    else {CA[i] <- all$HC[i]}
+  }
+  
+  # Points awarded
+  for(i in 1:n){
+    if(all$HomeTeam[i] == team){Pts[i] <- all$HPts[i]}
+    else {Pts[i] <- all$APts[i]}
+  }
+  
+  Pld <- matrix(1,n,1) # Vector containing matches played
+  GD <- GF-GA
+  TG <- GF+GA
+  TSRF <- SF/(SF+SA)
+  TSRA <- SA/(SF+SA)
+  
+  feats <- cbind.data.frame(Pld,GF,GA,GD,TG,SF,SA,STF,STA,TSRF,TSRA,CF,CA,Pts)
+  featsSums <- colSums(feats)
+  featsRes <- featsSums
+  nOb <- nrow(feats)
+  featsRes[10] <- featsSums[10]/nOb # This compute the average TSRF.
+  featsRes[11] <- featsSums[11]/nOb # This computes the average TSRA.
+  return(round(featsRes,2))
+}
+
+# Applying function to Tottenham and Man City
+Tot.features <- feature.Calc(soc_dat, 'Tottenham')
+print(Tot.features)
+
+MC.features <- feature.Calc(soc_dat, 'Man City')
+print(MC.features)
+
+# We now want to apply the function the all teams in turn
+Teams <- unique(soc_dat$HomeTeam)
+Teams <- sort(Teams) # Put them in alphabetical order
+nTeams <- length(Teams) # Number of teams
+print(Teams)
+
+featureRes <- matrix(NA,nTeams,14)
+for(i in 1:nTeams){
+  featureRes[i,] <- feature.Calc(soc_dat, Teams[i])
+}
+
+# Compile feature table results
+featureTab <- cbind.data.frame(Teams, featureRes)
+colnames(featureTab) <- c("Team","Pld","GF","GA","GD","TG","SF","SA","STF",
+                          "STA","TSRF","TSRA","CF","CA","Pts")
+print(featureTab)
+
+# Now we want to produce a scatter plot of TSRF and points awarded to check for correlation
+x <- featureTab$TSRF
+y <- featureTab$Pts
+
+# Correlation test
+cor.test(x,y)
+
+# Scatter plot
+plot(x,y, pch=20, xlim=c(0.2,0.8), ylim=c(0,25), xlab="Average TSRF score", ylab="Points earned")
+text(y~x, labels=Teams, cex=0.8, font=1, pos=4)  # This puts team names on the data points. 
+abline(lm(y~x), lty=2) # This draws a least squares best fit line through the data points.
